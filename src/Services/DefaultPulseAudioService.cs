@@ -1,4 +1,4 @@
-using BlueZNet.Interfaces;
+﻿using BlueZNet.Interfaces;
 using BlueZNet.Models.Audio;
 using BlueZNet.Models.Config;
 using Microsoft.Extensions.Logging;
@@ -391,13 +391,13 @@ namespace BlueZNet.Services
                 {
                     var line = lines[i].Trim();
 
-                    if (line.StartsWith("Sink #") && i + 1 < lines.Length)
+                    if (line.StartsWith("Sink #"))
                     {
                         inCorrectSink = false;
-                        // Check if this is our sink by looking ahead
+                        // Check if this is our sink by looking ahead for the "Name:" line
                         for (int j = i + 1; j < Math.Min(i + 10, lines.Length); j++)
                         {
-                            if (lines[j].Trim().Contains($"Name: {sinkName}"))
+                            if (lines[j].Trim().StartsWith("Name: " + sinkName))
                             {
                                 inCorrectSink = true;
                                 break;
