@@ -357,6 +357,19 @@ namespace BlueZNet.Services
 
         /// <summary>
         /// Parses PulseAudio sink information from pactl output.
+        /// Expected format is a multi-line block for each sink. We look for the sink by name
+        /// and then parse properties within its block.
+        /// <code>
+        /// Sink #123
+        ///     State: RUNNING
+        ///     Name: bluez_sink.AA_BB_CC_DD_EE_FF.a2dp_sink
+        ///     Description: My Bluetooth Speaker
+        ///     Volume: front-left: 65536 / 100% / 0.00 dB,   front-right: 65536 / 100% / 0.00 dB
+        ///     Mute: no
+        ///     Sample Specification: s16le 2ch 44100Hz
+        ///     Properties:
+        ///         device.string = "AA:BB:CC:DD:EE:FF"
+        /// </code>
         /// </summary>
         private AudioStreamInfo ParseSinkInfo(string output, string sinkName)
         {
@@ -447,6 +460,15 @@ namespace BlueZNet.Services
 
         /// <summary>
         /// Parses the pactl list modules output into structured module information.
+        /// Expected format is a multi-line block for each module.
+        /// <code>
+        /// Module #25
+        ///     Name: module-ladspa-sink
+        ///     Argument: sink_name=... master=... plugin=... label=... control=...
+        ///     Usage counter: 0
+        ///     Properties:
+        ///         ...
+        /// </code>
         /// </summary>
         private List<ModuleInfo> ParseModules(string output)
         {
@@ -483,6 +505,8 @@ namespace BlueZNet.Services
 
         /// <summary>
         /// Parses module arguments string into key-value pairs.
+        /// Handles space-separated key=value pairs where values may be quoted.
+        /// e.g., `key1=value1 key2="value with spaces" key3=value3`
         /// </summary>
         private Dictionary<string, string> ParseArguments(string argumentString)
         {
