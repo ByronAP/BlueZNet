@@ -1,4 +1,4 @@
-﻿using BlueZNet.Enums;
+using BlueZNet.Enums;
 using BlueZNet.Events;
 using BlueZNet.Interfaces;
 using BlueZNet.Interfaces.DBus;
@@ -57,6 +57,9 @@ namespace BlueZNet.Services
         /// <summary>
         /// Initializes a new instance with custom process runner.
         /// </summary>
+        /// <param name="dbusFactory">The D-Bus connection factory.</param>
+        /// <param name="processRunner">The process runner for external commands.</param>
+        /// <param name="logger">The logger instance.</param>
         public DefaultBlueZDeviceManager(IDBusConnectionFactory dbusFactory, IProcessRunner processRunner, ILogger logger = null)
             : this(dbusFactory, processRunner, logger, BlueZNetConfiguration.Default)
         {
@@ -150,7 +153,7 @@ namespace BlueZNet.Services
                 var deviceProperties = await deviceProxy.GetAllAsync(DeviceInterface);
 
                 var supportedProfiles = await GetSupportedProfilesAsync(deviceAddress, cancellationToken);
-                var avrcpCaps = await GetAvrcpCapabilitiesAsync(device.ObjectPath);
+                var avrcpCaps = await GetAvrcpCapabilitiesAsync(device.ObjectPath, cancellationToken);
                 var a2dpCaps = await GetA2dpCapabilitiesAsync(deviceAddress, cancellationToken);
 
                 return new DeviceCapabilities(
@@ -462,7 +465,7 @@ namespace BlueZNet.Services
         {
             try
             {
-                if (_objectManager == null)
+                if (_objectManager == null) throw new InvalidOperationException("ObjectManager not initialized");
                     throw new InvalidOperationException("ObjectManager not initialized");
 
                 var interfacesAddedSubscription = await _objectManager.WatchInterfacesAddedAsync(
@@ -489,7 +492,7 @@ namespace BlueZNet.Services
         /// </summary>
         private async Task SubscribeToExistingDevicePropertiesAsync()
         {
-            var devices = _knownDevices.Values.ToList();
+            foreach (var device in _knownDevices.Values.ToList())
             foreach (var device in devices)
             {
                 try
@@ -510,12 +513,12 @@ namespace BlueZNet.Services
         {
             try
             {
-                if (_connection == null)
+                if (_connection == null) throw new InvalidOperationException("Connection not initialized");
                     throw new InvalidOperationException("Connection not initialized");
 
                 var properties = _dbusFactory.CreateProxy<IProperties>(_connection, BluezService, objectPath);
                 var subscription = await properties.WatchPropertiesChangedAsync(
-                    change => SafeInvokeAsync(() => OnDevicePropertyChanged(objectPath, change)),
+                    change => SafeInvokeAsync(() => OnDevicePropertyChangedAsync(objectPath, change)),
                     ex => _logger.LogError(ex, "Error in device property subscription for {ObjectPath}", objectPath));
 
                 _subscriptions.Add(subscription);
@@ -589,9 +592,9 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Handles device property changes.
+        /// Handles device property changes. Refreshes the device state and raises events.
         /// </summary>
-        private async Task OnDevicePropertyChanged(string objectPath, (string interfaceName, IDictionary<string, object> changedProperties, string[] invalidatedProperties) change)
+        private async Task OnDevicePropertyChangedAsync(string objectPath, (string interfaceName, IDictionary<string, object> changedProperties, string[] invalidatedProperties) change)
         {
             try
             {
@@ -651,7 +654,7 @@ namespace BlueZNet.Services
                     properties = await propsProxy.GetAllAsync(DeviceInterface);
                 }
 
-                if (!properties.TryGetValue("Address", out var addressObj) || !(addressObj is string address))
+                if (!properties.TryGetValue("Address", out var addressObj) || !(addressObj is string address)) return null;
                     return null;
 
                 // Track the address to object path mapping

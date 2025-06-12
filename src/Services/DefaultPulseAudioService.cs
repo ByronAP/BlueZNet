@@ -1,4 +1,4 @@
-﻿using BlueZNet.Interfaces;
+using BlueZNet.Interfaces;
 using BlueZNet.Models.Audio;
 using BlueZNet.Models.Config;
 using Microsoft.Extensions.Logging;
@@ -26,7 +26,6 @@ namespace BlueZNet.Services
         /// <summary>
         /// Initializes a new instance of the <see cref="DefaultPulseAudioService"/> class.
         /// </summary>
-        /// <param name="processRunner">The process runner for executing pactl commands.</param>
         /// <param name="logger">The logger instance.</param>
         public DefaultPulseAudioService(ILogger logger = null)
             : this(new DefaultProcessRunner(logger), logger, BlueZNetConfiguration.Default)
@@ -36,6 +35,8 @@ namespace BlueZNet.Services
         /// <summary>
         /// Initializes a new instance with custom process runner.
         /// </summary>
+        /// <param name="processRunner">The process runner for executing pactl commands.</param>
+        /// <param name="logger">The logger instance.</param>
         public DefaultPulseAudioService(IProcessRunner processRunner, ILogger logger = null)
             : this(processRunner, logger, BlueZNetConfiguration.Default)
         {
@@ -44,6 +45,9 @@ namespace BlueZNet.Services
         /// <summary>
         /// Initializes a new instance with full configuration.
         /// </summary>
+        /// <param name="processRunner">The process runner for executing pactl commands.</param>
+        /// <param name="logger">The logger instance.</param>
+        /// <param name="configuration">The configuration instance.</param>
         public DefaultPulseAudioService(IProcessRunner processRunner, ILogger logger, BlueZNetConfiguration configuration)
         {
             _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
@@ -409,7 +413,8 @@ namespace BlueZNet.Services
                         }
                         else if (line.StartsWith("Volume:"))
                         {
-                            // Parse volume percentage
+                            // Parse volume percentage from a line like:
+                            // Volume: front-left: 65536 / 100% / 0.00 dB, ...
                             var match = VolumeRegex.Match(line);
                             if (match.Success && double.TryParse(match.Groups[1].Value, out var vol))
                             {
@@ -422,12 +427,13 @@ namespace BlueZNet.Services
                         }
                         else if (line.StartsWith("Sample Specification:"))
                         {
-                            // Parse format and sample rate
-                            var parts = line.Split(' ');
+                            // Parse format and sample rate from a line like:
+                            // Sample Specification: s16le 2ch 44100Hz
+                            var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                             if (parts.Length >= 3)
                             {
-                                format = parts[2];
-                                if (parts.Length >= 4 && uint.TryParse(parts[3].Replace("Hz", ""), out var rate))
+                                format = parts[1];
+                                if (uint.TryParse(parts[3].Replace("Hz", ""), out var rate))
                                 {
                                     sampleRate = rate;
                                 }
@@ -515,8 +521,8 @@ namespace BlueZNet.Services
             if (string.IsNullOrWhiteSpace(argumentString))
                 return arguments;
 
-            // Arguments are typically space-separated key=value pairs
-            // But values might contain spaces if quoted, so we need careful parsing
+            // This parser handles simple key=value and key="value with spaces" formats.
+            // It splits by space, but re-joins parts that are inside quotes.
             var parts = new List<string>();
             var currentPart = "";
             bool inQuotes = false;
@@ -572,7 +578,7 @@ namespace BlueZNet.Services
             if (string.IsNullOrWhiteSpace(controlString))
                 return new string[0];
 
-            // Control values are typically comma-separated
+            // Control values are typically comma-separated floats/integers
             return controlString.Split(',')
                                .Select(s => s.Trim())
                                .Where(s => !string.IsNullOrEmpty(s))

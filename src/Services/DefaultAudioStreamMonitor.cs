@@ -1,4 +1,4 @@
-﻿using BlueZNet.Events;
+using BlueZNet.Events;
 using BlueZNet.Interfaces;
 using BlueZNet.Interfaces.DBus;
 using BlueZNet.Models.Audio;
@@ -50,8 +50,12 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Constructor with D-Bus factory.
+        /// Initializes a new instance of the <see cref="DefaultAudioStreamMonitor"/> class with a custom D-Bus factory.
         /// </summary>
+        /// <param name="pulseAudioService">The PulseAudio service for audio operations.</param>
+        /// <param name="deviceManager">The device manager for device information.</param>
+        /// <param name="dbusFactory">The D-Bus connection factory for BlueZ communication.</param>
+        /// <param name="logger">The logger instance.</param>
         public DefaultAudioStreamMonitor(IPulseAudioService pulseAudioService, IBlueZDeviceManager deviceManager, IDBusConnectionFactory dbusFactory, ILogger logger = null)
             : this(pulseAudioService, deviceManager, dbusFactory, logger, BlueZNetConfiguration.Default)
         {
@@ -376,7 +380,7 @@ namespace BlueZNet.Services
         /// </summary>
         private async Task MonitorAudioStreamsAsync()
         {
-            if (!await _audioStreamSemaphore.WaitAsync(0))
+            if (!await _audioStreamSemaphore.WaitAsync(TimeSpan.Zero))
                 return; // Skip if already running
 
             try

@@ -1,4 +1,4 @@
-﻿using BlueZNet.Enums;
+using BlueZNet.Enums;
 using BlueZNet.Events;
 using BlueZNet.Interfaces;
 using BlueZNet.Models.Audio;
@@ -141,6 +141,7 @@ namespace BlueZNet.Services
         /// <param name="deviceManager">The device manager.</param>
         /// <param name="mediaPlayerManager">The media player manager.</param>
         /// <param name="audioStreamMonitor">The audio stream monitor.</param>
+        /// <param name="configuration">The configuration instance.</param>
         /// <exception cref="ArgumentNullException">Thrown when any required dependency is null.</exception>
         /// <remarks>
         /// <para>
