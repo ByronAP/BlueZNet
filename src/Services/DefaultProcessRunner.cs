@@ -21,6 +21,7 @@ namespace BlueZNet.Services
         /// <summary>
         /// Initializes a new instance with default configuration.
         /// </summary>
+        /// <param name="logger">The logger instance.</param>
         public DefaultProcessRunner(ILogger logger = null)
             : this(logger, BlueZNetConfiguration.Default)
         {
@@ -29,6 +30,8 @@ namespace BlueZNet.Services
         /// <summary>
         /// Initializes a new instance with custom configuration.
         /// </summary>
+        /// <param name="logger">The logger instance.</param>
+        /// <param name="configuration">The configuration instance.</param>
         public DefaultProcessRunner(ILogger logger, BlueZNetConfiguration configuration)
         {
             _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;

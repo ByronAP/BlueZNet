@@ -141,7 +141,7 @@ namespace BlueZNet.Models.Media
         }
 
         /// <summary>
-        /// Gets a value indicating whether this endpoint represents a lossless codec.
+        /// Gets a value indicating whether this endpoint represents a lossless or near-lossless codec.
         /// </summary>
         /// <remarks>
         /// Currently, aptX HD and LDAC are considered lossless or near-lossless codecs.
@@ -182,12 +182,12 @@ namespace BlueZNet.Models.Media
             {
                 switch (Codec)
                 {
-                    case 0x00: return 328;   // SBC
+                    case 0x00: return 328;   // SBC (at high quality settings)
                     case 0x01: return 320;   // MP3
                     case 0x02: return 320;   // AAC
                     case 0x40: return 352;   // aptX
                     case 0x41: return 576;   // aptX HD
-                    case 0xAA: return 990;   // LDAC
+                    case 0xAA: return 990;   // LDAC (at highest quality setting)
                     default: return 0;
                 }
             }
@@ -236,9 +236,9 @@ namespace BlueZNet.Models.Media
 
                 if (Capabilities != null)
                 {
-                    for (int i = 0; i < Capabilities.Length; i++)
+                    foreach (byte b in Capabilities)
                     {
-                        hash = hash * 23 + Capabilities[i].GetHashCode();
+                        hash = hash * 23 + b.GetHashCode();
                     }
                 }
 

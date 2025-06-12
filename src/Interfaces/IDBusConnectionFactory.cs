@@ -33,7 +33,9 @@ namespace BlueZNet.Interfaces
     ///         {
     ///             try
     ///             {
-    ///                 return Connection.System;
+    ///                 var connection = new Connection(Address.System);
+    ///                 await connection.ConnectAsync();
+    ///                 return connection;
     ///             }
     ///             catch when (attempt &lt; 2)
     ///             {
@@ -42,6 +44,7 @@ namespace BlueZNet.Interfaces
     ///         }
     ///         throw new BlueZNetException("Failed to connect after 3 attempts");
     ///     }
+    ///     // ... other method implementations
     /// }
     /// </code>
     /// </example>

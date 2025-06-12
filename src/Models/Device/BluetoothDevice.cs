@@ -120,6 +120,7 @@ namespace BlueZNet.Models.Device
         /// <summary>
         /// Creates a new instance with updated properties.
         /// </summary>
+        /// <returns>A new <see cref="BluetoothDevice"/> instance with the specified properties updated.</returns>
         public BluetoothDevice WithUpdatedProperties(
             bool? connected = null,
             DateTime? lastSeen = null,

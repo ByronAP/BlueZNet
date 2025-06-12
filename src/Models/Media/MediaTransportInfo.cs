@@ -222,7 +222,6 @@ namespace BlueZNet.Models.Media
             return Configuration.SequenceEqual(other.Configuration);
         }
 
-
         /// <summary>
         /// Returns a hash code for the current transport info.
         /// </summary>

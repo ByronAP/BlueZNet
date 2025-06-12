@@ -41,7 +41,7 @@
         public bool EnableVerboseLogging { get; set; } = false;
 
         /// <summary>
-        /// Creates a default configuration instance.
+        /// Gets a default configuration instance.
         /// </summary>
         public static BlueZNetConfiguration Default => new BlueZNetConfiguration();
     }

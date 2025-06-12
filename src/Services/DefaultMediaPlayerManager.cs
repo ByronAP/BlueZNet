@@ -18,6 +18,7 @@ namespace BlueZNet.Services
     /// </summary>
     public class DefaultMediaPlayerManager : IMediaPlayerManager, IDisposable
     {
+        // D-Bus service and interface names for BlueZ
         private const string BluezService = "org.bluez";
         private const string MediaPlayerInterface = "org.bluez.MediaPlayer1";
         private const string MediaFolderInterface = "org.bluez.MediaFolder1";
@@ -37,6 +38,9 @@ namespace BlueZNet.Services
         /// <summary>
         /// Initializes a new instance with default configuration.
         /// </summary>
+        /// <param name="dbusFactory">The D-Bus connection factory.</param>
+        /// <param name="deviceManager">The device manager for device information.</param>
+        /// <param name="logger">The logger instance.</param>
         public DefaultMediaPlayerManager(IDBusConnectionFactory dbusFactory, IBlueZDeviceManager deviceManager, ILogger logger = null)
             : this(dbusFactory, deviceManager, logger, BlueZNetConfiguration.Default)
         {
@@ -104,6 +108,7 @@ namespace BlueZNet.Services
         {
             return await ExecuteMediaCommandAsync(deviceAddress, async player =>
             {
+                // This is a special case of setting a property on the media player interface
                 await player.SetAsync("Position", positionMs);
             }, cancellationToken);
         }
@@ -178,7 +183,7 @@ namespace BlueZNet.Services
                 var deviceObjectPath = device.ObjectPath;
                 var mediaPlayerObjectPath = device.MediaPlayer.ObjectPath;
 
-                // Get all managed objects from BlueZ
+                // 1. Get all managed objects from BlueZ
                 var objectManager = _dbusFactory.CreateProxy<IObjectManager>(_connection, BluezService, "/");
                 var managedObjects = await objectManager.GetManagedObjectsAsync();
 
@@ -189,37 +194,33 @@ namespace BlueZNet.Services
                     var objectPath = kvp.Key.ToString();
                     var interfaces = kvp.Value;
 
-                    // Check if this object has the MediaFolder interface
-                    if (interfaces.ContainsKey(MediaFolderInterface))
+                    // 2. Check if this object has the MediaFolder interface and belongs to our device
+                    if (interfaces.ContainsKey(MediaFolderInterface) && IsMediaFolderForDevice(objectPath, deviceObjectPath, mediaPlayerObjectPath))
                     {
-                        // Verify this folder belongs to our device
-                        if (IsMediaFolderForDevice(objectPath, deviceObjectPath, mediaPlayerObjectPath))
+                        // 3. Apply path filtering (root or subfolder)
+                        if (folderPath != null)
                         {
-                            // If folderPath is specified, only include folders under that path
-                            if (folderPath != null)
-                            {
-                                if (!IsSubFolderOf(objectPath, folderPath))
-                                    continue;
+                            if (!IsSubFolderOf(objectPath, folderPath))
+                                continue;
 
-                                // Only include direct children, not deep descendants
-                                if (!IsDirectChild(objectPath, folderPath))
-                                    continue;
-                            }
-                            else
-                            {
-                                // If no specific folder path, only include top-level folders
-                                if (!IsTopLevelMediaFolder(objectPath, mediaPlayerObjectPath))
-                                    continue;
-                            }
+                            // Only include direct children, not deep descendants
+                            if (!IsDirectChild(objectPath, folderPath))
+                                continue;
+                        }
+                        else
+                        {
+                            // If no specific folder path, only include top-level folders
+                            if (!IsTopLevelMediaFolder(objectPath, mediaPlayerObjectPath))
+                                continue;
+                        }
 
-                            var folderProperties = interfaces[MediaFolderInterface];
-                            var folder = await CreateMediaFolderAsync(objectPath, folderProperties, cancellationToken);
+                        var folderProperties = interfaces[MediaFolderInterface];
+                        var folder = await CreateMediaFolderAsync(objectPath, folderProperties, cancellationToken);
 
-                            if (folder != null)
-                            {
-                                folders.Add(folder);
-                                _logger.LogTrace("Found media folder: {Name} at {Path}", folder.Name, objectPath);
-                            }
+                        if (folder != null)
+                        {
+                            folders.Add(folder);
+                            _logger.LogTrace("Found media folder: {Name} at {Path}", folder.Name, objectPath);
                         }
                     }
                 }
@@ -540,7 +541,8 @@ namespace BlueZNet.Services
                 }
                 else
                 {
-                    // Some folders don't expose NumberOfItems as a property, try calling the method
+                    // WORKAROUND: Some folders don't expose NumberOfItems as a property.
+                    // As a fallback, try calling the GetNumberOfItems D-Bus method.
                     try
                     {
                         var folderProxy = _dbusFactory.CreateProxy<IMediaFolder>(_connection, BluezService, objectPath);
@@ -549,8 +551,7 @@ namespace BlueZNet.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogTrace(ex, "Could not get NumberOfItems for folder {ObjectPath}", objectPath);
-                        // This is not critical, continue without item count
+                        _logger.LogTrace(ex, "Could not get NumberOfItems for folder {ObjectPath} via method call. This is not critical.", objectPath);
                     }
                 }
 

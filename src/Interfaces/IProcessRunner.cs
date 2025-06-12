@@ -24,9 +24,9 @@ namespace BlueZNet.Interfaces
     /// // Custom implementation with retry logic
     /// public class RetryingProcessRunner : IProcessRunner
     /// {
-    ///     public async Task&lt;ProcessResult&gt; RunAsync(string command, string arguments, CancellationToken cancellationToken = default)
+    ///     public async Task<ProcessResult> RunAsync(string command, string arguments, CancellationToken cancellationToken = default)
     ///     {
-    ///         for (int attempt = 0; attempt &lt; 3; attempt++)
+    ///         for (int attempt = 0; attempt < 3; attempt++)
     ///         {
     ///             var result = await ExecuteProcessAsync(command, arguments, cancellationToken);
     ///             if (result.Success || attempt == 2) return result;
@@ -34,6 +34,7 @@ namespace BlueZNet.Interfaces
     ///         }
     ///         return new ProcessResult { ExitCode = -1, StandardError = "Max retries exceeded" };
     ///     }
+    ///     // ... other method implementations
     /// }
     /// </code>
     /// </example>

@@ -44,6 +44,11 @@ namespace BlueZNet.Models.Audio
         /// </summary>
         public bool IsActive { get; }
 
+        /// <summary>
+        /// Determines whether the specified object is equal to the current codec.
+        /// </summary>
+        /// <param name="obj">The object to compare with the current instance.</param>
+        /// <returns>True if the specified object is equal to the current instance; otherwise, false.</returns>
         public override bool Equals(object obj)
         {
             if (obj is AudioCodec other)
@@ -53,6 +58,10 @@ namespace BlueZNet.Models.Audio
             return false;
         }
 
+        /// <summary>
+        /// Returns a hash code for the current codec.
+        /// </summary>
+        /// <returns>A hash code for the current instance.</returns>
         public override int GetHashCode()
         {
             return (Name?.GetHashCode() ?? 0) ^ Bitrate.GetHashCode() ^ (Quality?.GetHashCode() ?? 0) ^ IsActive.GetHashCode();

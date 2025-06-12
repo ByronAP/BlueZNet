@@ -58,17 +58,28 @@ namespace BlueZNet.Models.Audio
         /// <example>44100, 48000</example>
         public uint? SampleRate { get; }
 
+        /// <summary>
+        /// Determines whether the specified object is equal to the current audio stream info.
+        /// </summary>
+        /// <param name="obj">The object to compare with the current instance.</param>
+        /// <returns>True if the specified object is equal to the current instance; otherwise, false.</returns>
         public override bool Equals(object obj)
         {
             if (obj is AudioStreamInfo other)
             {
+                // Use a small tolerance for comparing double values
+                const double tolerance = 0.001;
                 return SinkName == other.SinkName && IsActive == other.IsActive &&
-                       Math.Abs(Volume - other.Volume) < 0.001 && IsMuted == other.IsMuted &&
+                       Math.Abs(Volume - other.Volume) < tolerance && IsMuted == other.IsMuted &&
                        Format == other.Format && SampleRate == other.SampleRate;
             }
             return false;
         }
 
+        /// <summary>
+        /// Returns a hash code for the current audio stream info.
+        /// </summary>
+        /// <returns>A hash code for the current instance.</returns>
         public override int GetHashCode()
         {
             return (SinkName?.GetHashCode() ?? 0) ^ IsActive.GetHashCode() ^ Volume.GetHashCode() ^

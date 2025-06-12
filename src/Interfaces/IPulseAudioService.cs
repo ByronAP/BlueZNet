@@ -36,6 +36,7 @@ namespace BlueZNet.Interfaces
     ///         _cache[deviceAddress] = info;
     ///         return info;
     ///     }
+    ///     // ... other method implementations
     /// }
     /// </code>
     /// </example>

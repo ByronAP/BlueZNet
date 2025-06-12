@@ -50,6 +50,8 @@ namespace BlueZNet.Services
         /// <summary>
         /// Sets the configuration for timeouts and behavior.
         /// </summary>
+        /// <param name="configuration">The configuration instance.</param>
+        /// <returns>The builder instance for fluent chaining.</returns>
         public BlueZNetControllerBuilder WithConfiguration(BlueZNetConfiguration configuration)
         {
             _configuration = configuration;
