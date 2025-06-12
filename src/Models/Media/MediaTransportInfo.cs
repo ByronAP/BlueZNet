@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 
 namespace BlueZNet.Models.Media
 {
@@ -192,17 +193,35 @@ namespace BlueZNet.Models.Media
         /// <returns>True if the specified object is equal to the current instance; otherwise, false.</returns>
         public override bool Equals(object obj)
         {
-            if (obj is MediaTransportInfo other)
+            var other = obj as MediaTransportInfo;
+            if (other == null)
             {
-                return ObjectPath == other.ObjectPath &&
-                       Device == other.Device &&
-                       UUID == other.UUID &&
-                       Codec == other.Codec &&
-                       State == other.State &&
-                       Volume == other.Volume;
+                return false;
             }
-            return false;
+
+            // Compare primitive and string properties first for quick exit
+            if (ObjectPath != other.ObjectPath ||
+                Device != other.Device ||
+                UUID != other.UUID ||
+                Codec != other.Codec ||
+                State != other.State ||
+                Volume != other.Volume)
+            {
+                return false;
+            }
+
+            // Compare byte arrays
+            if (Configuration == null && other.Configuration == null)
+            {
+                return true;
+            }
+            if (Configuration == null || other.Configuration == null)
+            {
+                return false; // One is null, the other is not
+            }
+            return Configuration.SequenceEqual(other.Configuration);
         }
+
 
         /// <summary>
         /// Returns a hash code for the current transport info.
@@ -219,6 +238,15 @@ namespace BlueZNet.Models.Media
                 hash = hash * 23 + Codec.GetHashCode();
                 hash = hash * 23 + (State?.GetHashCode() ?? 0);
                 hash = hash * 23 + Volume.GetHashCode();
+
+                if (Configuration != null)
+                {
+                    foreach (byte b in Configuration)
+                    {
+                        hash = hash * 23 + b.GetHashCode();
+                    }
+                }
+
                 return hash;
             }
         }
