@@ -257,8 +257,7 @@ namespace BlueZNet.Services
                 }
 
                 // Check for active media transport (indicates A2DP is active)
-                var hasActiveA2dpTransport = await HasActiveMediaTransportAsync(deviceAddress, cancellationToken);
-                if (hasActiveA2dpTransport)
+                if (await HasActiveMediaTransportAsync(deviceAddress, cancellationToken))
                 {
                     _logger.LogDebug("Device {DeviceAddress} has active A2DP transport", deviceAddress);
                     return AudioProfile.A2DP;
@@ -276,23 +275,9 @@ namespace BlueZNet.Services
                 var availableProfiles = await GetConnectedProfilesAsync(device.ObjectPath, connectedServices, cancellationToken);
 
                 // Return the most likely active profile based on priority and availability
-                if (availableProfiles.Contains(AudioProfile.A2DP))
-                {
-                    _logger.LogDebug("Device {DeviceAddress} defaulting to A2DP profile", deviceAddress);
-                    return AudioProfile.A2DP;
-                }
-
-                if (availableProfiles.Contains(AudioProfile.HFP))
-                {
-                    _logger.LogDebug("Device {DeviceAddress} defaulting to HFP profile", deviceAddress);
-                    return AudioProfile.HFP;
-                }
-
-                if (availableProfiles.Contains(AudioProfile.HSP))
-                {
-                    _logger.LogDebug("Device {DeviceAddress} defaulting to HSP profile", deviceAddress);
-                    return AudioProfile.HSP;
-                }
+                if (availableProfiles.Contains(AudioProfile.A2DP)) return AudioProfile.A2DP;
+                if (availableProfiles.Contains(AudioProfile.HFP)) return AudioProfile.HFP;
+                if (availableProfiles.Contains(AudioProfile.HSP)) return AudioProfile.HSP;
 
                 _logger.LogDebug("No clear active profile detected for device {DeviceAddress}", deviceAddress);
                 return null;
@@ -441,7 +426,6 @@ namespace BlueZNet.Services
                             {
                                 _connectedDevices[device.Address] = device;
                             }
-
                             _logger.LogDebug("Loaded device: {Name} ({Address}) - Connected: {Connected}",
                                 device.Name, device.Address, device.Connected);
                         }
@@ -466,7 +450,6 @@ namespace BlueZNet.Services
             try
             {
                 if (_objectManager == null) throw new InvalidOperationException("ObjectManager not initialized");
-                    throw new InvalidOperationException("ObjectManager not initialized");
 
                 var interfacesAddedSubscription = await _objectManager.WatchInterfacesAddedAsync(
                     args => SafeInvokeAsync(() => OnInterfacesAddedAsync(args)),
@@ -493,7 +476,6 @@ namespace BlueZNet.Services
         private async Task SubscribeToExistingDevicePropertiesAsync()
         {
             foreach (var device in _knownDevices.Values.ToList())
-            foreach (var device in devices)
             {
                 try
                 {
@@ -514,7 +496,6 @@ namespace BlueZNet.Services
             try
             {
                 if (_connection == null) throw new InvalidOperationException("Connection not initialized");
-                    throw new InvalidOperationException("Connection not initialized");
 
                 var properties = _dbusFactory.CreateProxy<IProperties>(_connection, BluezService, objectPath);
                 var subscription = await properties.WatchPropertiesChangedAsync(
@@ -655,9 +636,6 @@ namespace BlueZNet.Services
                 }
 
                 if (!properties.TryGetValue("Address", out var addressObj) || !(addressObj is string address)) return null;
-                    return null;
-
-                // Track the address to object path mapping
                 _deviceAddressToObjectPath[address] = objectPath;
 
                 var name = properties.TryGetValue("Alias", out var aliasObj) && aliasObj is string aliasStr && !string.IsNullOrEmpty(aliasStr)
