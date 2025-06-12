@@ -1,4 +1,4 @@
-using BlueZNet.Enums;
+﻿using BlueZNet.Enums;
 using BlueZNet.Events;
 using BlueZNet.Interfaces;
 using BlueZNet.Models.Audio;
