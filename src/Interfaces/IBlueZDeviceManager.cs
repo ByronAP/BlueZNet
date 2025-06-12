@@ -2,6 +2,7 @@
 using BlueZNet.Events;
 using BlueZNet.Models.Capabilities;
 using BlueZNet.Models.Device;
+using BlueZNet.Models.Media;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -82,6 +83,14 @@ namespace BlueZNet.Interfaces
         /// <param name="cancellationToken">A token to cancel the operation.</param>
         /// <returns>True if the feature is supported; otherwise, false.</returns>
         Task<bool> IsFeatureSupportedAsync(string deviceAddress, string feature, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Gets all media transports associated with the specified device.
+        /// </summary>
+        /// <param name="deviceAddress">The MAC address of the device.</param>
+        /// <param name="cancellationToken">A token to cancel the operation.</param>
+        /// <returns>A list of media transports for the device.</returns>
+        Task<IReadOnlyList<MediaTransportInfo>> GetMediaTransportsAsync(string deviceAddress, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Starts monitoring for device connection changes.

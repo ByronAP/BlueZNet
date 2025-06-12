@@ -6,6 +6,7 @@ using BlueZNet.Models.Audio;
 using BlueZNet.Models.Capabilities;
 using BlueZNet.Models.Config;
 using BlueZNet.Models.Device;
+using BlueZNet.Models.Media;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
@@ -136,7 +137,7 @@ namespace BlueZNet.Services
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!_connectedDevices.TryGetValue(deviceAddress, out var device))
+                if (!_knownDevices.TryGetValue(deviceAddress, out var device))
                 {
                     _logger.LogWarning("Device {DeviceAddress} not found", deviceAddress);
                     return new DeviceCapabilities();
@@ -150,7 +151,7 @@ namespace BlueZNet.Services
 
                 var supportedProfiles = await GetSupportedProfilesAsync(deviceAddress, cancellationToken);
                 var avrcpCaps = await GetAvrcpCapabilitiesAsync(device.ObjectPath);
-                var a2dpCaps = await GetA2dpCapabilitiesAsync(device.ObjectPath);
+                var a2dpCaps = await GetA2dpCapabilitiesAsync(deviceAddress, cancellationToken);
 
                 return new DeviceCapabilities(
                     avrcpCaps,
@@ -175,7 +176,7 @@ namespace BlueZNet.Services
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!_connectedDevices.TryGetValue(deviceAddress, out var device))
+                if (!_knownDevices.TryGetValue(deviceAddress, out var device))
                     return new List<AudioProfile>();
 
                 if (_connection == null)
@@ -210,7 +211,7 @@ namespace BlueZNet.Services
 
                 _logger.LogDebug("Device {DeviceAddress} supports profiles: {Profiles}",
                     deviceAddress, string.Join(", ", profiles));
-                return profiles;
+                return profiles.Distinct().ToList();
             }
             catch (Exception ex)
             {
@@ -375,6 +376,7 @@ namespace BlueZNet.Services
         public async Task<bool> IsFeatureSupportedAsync(string deviceAddress, string feature, CancellationToken cancellationToken = default)
         {
             var capabilities = await GetDeviceCapabilitiesAsync(deviceAddress, cancellationToken);
+            if (capabilities == null) return false;
 
             switch (feature.ToLower())
             {
@@ -400,6 +402,12 @@ namespace BlueZNet.Services
                 default:
                     return false;
             }
+        }
+
+        /// <inheritdoc />
+        public async Task<IReadOnlyList<MediaTransportInfo>> GetMediaTransportsAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        {
+            return await GetMediaTransportsForDeviceAsync(deviceAddress, cancellationToken);
         }
 
         /// <summary>
@@ -507,7 +515,7 @@ namespace BlueZNet.Services
 
                 var properties = _dbusFactory.CreateProxy<IProperties>(_connection, BluezService, objectPath);
                 var subscription = await properties.WatchPropertiesChangedAsync(
-                    change => SafeInvoke(() => OnDevicePropertyChanged(objectPath, change)),
+                    change => SafeInvokeAsync(() => OnDevicePropertyChanged(objectPath, change)),
                     ex => _logger.LogError(ex, "Error in device property subscription for {ObjectPath}", objectPath));
 
                 _subscriptions.Add(subscription);
@@ -583,32 +591,43 @@ namespace BlueZNet.Services
         /// <summary>
         /// Handles device property changes.
         /// </summary>
-        private void OnDevicePropertyChanged(string objectPath, (string interfaceName, IDictionary<string, object> changedProperties, string[] invalidatedProperties) change)
+        private async Task OnDevicePropertyChanged(string objectPath, (string interfaceName, IDictionary<string, object> changedProperties, string[] invalidatedProperties) change)
         {
             try
             {
+                var device = _knownDevices.Values.FirstOrDefault(d => d.ObjectPath == objectPath);
+                if (device == null) return;
+
+                bool wasConnected = device.Connected;
+                bool isConnected = wasConnected;
+
                 if (change.interfaceName == DeviceInterface && change.changedProperties.ContainsKey("Connected"))
                 {
-                    var isConnected = (bool)change.changedProperties["Connected"];
-                    var device = _knownDevices.Values.FirstOrDefault(d => d.ObjectPath == objectPath);
+                    isConnected = (bool)change.changedProperties["Connected"];
+                }
 
-                    if (device != null)
+                // Refresh the entire device object to capture all changes
+                var updatedDevice = await CreateBluetoothDeviceAsync(objectPath, null);
+                if (updatedDevice == null) return;
+
+                _knownDevices[device.Address] = updatedDevice;
+
+                if (updatedDevice.Connected)
+                {
+                    _connectedDevices[device.Address] = updatedDevice;
+                    if (!wasConnected)
                     {
-                        var updatedDevice = device.WithUpdatedProperties(connected: isConnected, lastSeen: DateTime.UtcNow);
-                        _knownDevices[device.Address] = updatedDevice;
-
-                        if (isConnected)
-                        {
-                            _connectedDevices[device.Address] = updatedDevice;
-                            _logger.LogInformation("Device connected: {Name} ({Address})", device.Name, device.Address);
-                        }
-                        else
-                        {
-                            _connectedDevices.TryRemove(device.Address, out _);
-                            _logger.LogInformation("Device disconnected: {Name} ({Address})", device.Name, device.Address);
-                        }
-
-                        DeviceConnectionChanged?.Invoke(this, new BluetoothConnectionEventArgs(updatedDevice, isConnected));
+                        _logger.LogInformation("Device connected: {Name} ({Address})", updatedDevice.Name, updatedDevice.Address);
+                        DeviceConnectionChanged?.Invoke(this, new BluetoothConnectionEventArgs(updatedDevice, true));
+                    }
+                }
+                else
+                {
+                    _connectedDevices.TryRemove(device.Address, out _);
+                    if (wasConnected)
+                    {
+                        _logger.LogInformation("Device disconnected: {Name} ({Address})", updatedDevice.Name, updatedDevice.Address);
+                        DeviceConnectionChanged?.Invoke(this, new BluetoothConnectionEventArgs(updatedDevice, false));
                     }
                 }
             }
@@ -620,30 +639,27 @@ namespace BlueZNet.Services
 
         /// <summary>
         /// Creates a BluetoothDevice instance from BlueZ D-Bus properties.
+        /// If properties are null, they will be fetched from D-Bus.
         /// </summary>
         private async Task<BluetoothDevice> CreateBluetoothDeviceAsync(string objectPath, IDictionary<string, object> properties)
         {
             try
             {
+                if (properties == null)
+                {
+                    var propsProxy = _dbusFactory.CreateProxy<IProperties>(_connection, BluezService, objectPath);
+                    properties = await propsProxy.GetAllAsync(DeviceInterface);
+                }
+
                 if (!properties.TryGetValue("Address", out var addressObj) || !(addressObj is string address))
                     return null;
 
                 // Track the address to object path mapping
                 _deviceAddressToObjectPath[address] = objectPath;
 
-                var name = "";
-                if (properties.TryGetValue("Name", out var nameObj) && nameObj is string nameStr)
-                {
-                    name = nameStr;
-                }
-                else if (properties.TryGetValue("Alias", out var aliasObj) && aliasObj is string aliasStr)
-                {
-                    name = aliasStr;
-                }
-                else
-                {
-                    name = address;
-                }
+                var name = properties.TryGetValue("Alias", out var aliasObj) && aliasObj is string aliasStr && !string.IsNullOrEmpty(aliasStr)
+                    ? aliasStr
+                    : properties.TryGetValue("Name", out var nameObj) && nameObj is string nameStr ? nameStr : address;
 
                 var connected = properties.TryGetValue("Connected", out var connectedObj) && connectedObj is bool connectedBool && connectedBool;
 
@@ -655,7 +671,7 @@ namespace BlueZNet.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to create BluetoothDevice from properties");
+                _logger.LogError(ex, "Failed to create BluetoothDevice from properties for {ObjectPath}", objectPath);
                 return null;
             }
         }
@@ -667,34 +683,8 @@ namespace BlueZNet.Services
         {
             try
             {
-                if (_connection == null)
-                    return false;
-
-                var objectManager = _dbusFactory.CreateProxy<IObjectManager>(_connection, BluezService, "/");
-                var managedObjects = await objectManager.GetManagedObjectsAsync();
-
-                var deviceMacForPath = deviceAddress.Replace(":", "_");
-
-                foreach (var kvp in managedObjects)
-                {
-                    var objectPath = kvp.Key.ToString();
-                    var interfaces = kvp.Value;
-
-                    if (interfaces.ContainsKey("org.bluez.MediaTransport1") &&
-                        objectPath.Contains(deviceMacForPath))
-                    {
-                        var properties = interfaces["org.bluez.MediaTransport1"];
-                        if (properties.TryGetValue("State", out var stateObj) && stateObj is string state)
-                        {
-                            if (state == "active" || state == "pending")
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                }
-
-                return false;
+                var transports = await GetMediaTransportsForDeviceAsync(deviceAddress, cancellationToken);
+                return transports.Any(t => t.State == "active" || t.State == "pending");
             }
             catch (Exception ex)
             {
@@ -1014,17 +1004,218 @@ namespace BlueZNet.Services
         /// <summary>
         /// Gets A2DP capabilities for a device.
         /// </summary>
-        private Task<A2dpCapabilities> GetA2dpCapabilitiesAsync(string devicePath)
+        private async Task<A2dpCapabilities> GetA2dpCapabilitiesAsync(string deviceAddress, CancellationToken cancellationToken)
         {
-            // Simplified implementation
-            var codecs = new List<AudioCodec>
+            try
             {
-                new AudioCodec("SBC", 328, "Standard", true)
-            };
+                // Get all media transports and endpoints for this device
+                var mediaTransports = await GetMediaTransportsForDeviceAsync(deviceAddress, cancellationToken);
+                var mediaEndpoints = await GetMediaEndpointsForDeviceAsync(deviceAddress, cancellationToken);
 
-            var capabilities = new A2dpCapabilities(codecs, codecs.FirstOrDefault(), 990, false);
-            return Task.FromResult(capabilities);
+                var supportedCodecs = new List<AudioCodec>();
+                AudioCodec activeCodec = null;
+                uint maxBitrate = 0;
+
+                // Parse supported codecs from media endpoints
+                foreach (var endpoint in mediaEndpoints)
+                {
+                    var codecs = await ParseCodecsFromEndpointAsync(endpoint, cancellationToken);
+                    supportedCodecs.AddRange(codecs);
+                }
+
+                // Determine active codec and bitrate from active transport
+                var activeTransport = mediaTransports.FirstOrDefault(t => t.State == "active");
+                if (activeTransport != null)
+                {
+                    activeCodec = await GetCodecFromTransportAsync(activeTransport, cancellationToken);
+                    if (activeCodec != null)
+                    {
+                        // Mark the active codec and update supported codecs list
+                        for (int i = 0; i < supportedCodecs.Count; i++)
+                        {
+                            if (supportedCodecs[i].Name.Equals(activeCodec.Name, StringComparison.OrdinalIgnoreCase))
+                            {
+                                supportedCodecs[i] = new AudioCodec(activeCodec.Name, activeCodec.Bitrate, activeCodec.Quality, true);
+                                activeCodec = supportedCodecs[i];
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Calculate max bitrate across all codecs
+                foreach (var codec in supportedCodecs)
+                {
+                    maxBitrate = Math.Max(maxBitrate, codec.Bitrate);
+                }
+
+                // Determine if high-quality codecs are supported
+                bool supportsHighQuality = supportedCodecs.Any(c =>
+                    c.Quality == "High" || c.Quality == "Lossless" ||
+                    c.Name.Equals("aptX", StringComparison.OrdinalIgnoreCase) ||
+                    c.Name.Equals("LDAC", StringComparison.OrdinalIgnoreCase) ||
+                    c.Name.Equals("aptX HD", StringComparison.OrdinalIgnoreCase));
+
+                _logger.LogDebug("Found {Count} supported codecs for device {DeviceAddress}, active: {ActiveCodec}",
+                    supportedCodecs.Count, deviceAddress, activeCodec?.Name ?? "None");
+
+                return new A2dpCapabilities(supportedCodecs, activeCodec, maxBitrate, supportsHighQuality);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get A2DP capabilities for device {DeviceAddress}", deviceAddress);
+                return new A2dpCapabilities();
+            }
         }
+
+        #region A2DP Capability Helpers
+
+        private async Task<List<MediaTransportInfo>> GetMediaTransportsForDeviceAsync(string deviceAddress, CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (_connection == null) await StartMonitoringAsync(cancellationToken);
+
+                var objectManager = _dbusFactory.CreateProxy<IObjectManager>(_connection, BluezService, "/");
+                var managedObjects = await objectManager.GetManagedObjectsAsync();
+
+                var transports = new List<MediaTransportInfo>();
+                var deviceMacForPath = deviceAddress.Replace(":", "_");
+
+                foreach (var kvp in managedObjects)
+                {
+                    if (kvp.Value.ContainsKey("org.bluez.MediaTransport1") && kvp.Key.ToString().Contains(deviceMacForPath))
+                    {
+                        var transport = ParseMediaTransportInfo(kvp.Key.ToString(), kvp.Value["org.bluez.MediaTransport1"]);
+                        if (transport != null)
+                        {
+                            transports.Add(transport);
+                        }
+                    }
+                }
+                return transports;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get media transports for device {DeviceAddress}", deviceAddress);
+                return new List<MediaTransportInfo>();
+            }
+        }
+
+        private async Task<List<MediaEndpointInfo>> GetMediaEndpointsForDeviceAsync(string deviceAddress, CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (_connection == null) await StartMonitoringAsync(cancellationToken);
+
+                var objectManager = _dbusFactory.CreateProxy<IObjectManager>(_connection, BluezService, "/");
+                var managedObjects = await objectManager.GetManagedObjectsAsync();
+
+                var endpoints = new List<MediaEndpointInfo>();
+                var deviceMacForPath = deviceAddress.Replace(":", "_");
+
+                foreach (var kvp in managedObjects)
+                {
+                    if (kvp.Value.ContainsKey("org.bluez.MediaEndpoint1") && kvp.Key.ToString().Contains(deviceMacForPath))
+                    {
+                        var endpoint = ParseMediaEndpointInfo(kvp.Key.ToString(), kvp.Value["org.bluez.MediaEndpoint1"]);
+                        if (endpoint != null)
+                        {
+                            endpoints.Add(endpoint);
+                        }
+                    }
+                }
+                return endpoints;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get media endpoints for device {DeviceAddress}", deviceAddress);
+                return new List<MediaEndpointInfo>();
+            }
+        }
+
+        private MediaTransportInfo ParseMediaTransportInfo(string objectPath, IDictionary<string, object> properties)
+        {
+            try
+            {
+                return new MediaTransportInfo(
+                    objectPath,
+                    properties.TryGetValue("Device", out var dev) ? dev.ToString() : null,
+                    properties.TryGetValue("UUID", out var uuid) ? uuid.ToString() : null,
+                    properties.TryGetValue("Codec", out var c) ? (byte)c : (byte)0,
+                    properties.TryGetValue("State", out var s) ? s.ToString() : "idle",
+                    properties.TryGetValue("Volume", out var v) ? (ushort)v : (ushort)0,
+                    properties.TryGetValue("Configuration", out var cfg) ? (byte[])cfg : null
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to parse MediaTransport info for {ObjectPath}", objectPath);
+                return null;
+            }
+        }
+
+        private MediaEndpointInfo ParseMediaEndpointInfo(string objectPath, IDictionary<string, object> properties)
+        {
+            try
+            {
+                return new MediaEndpointInfo(
+                    objectPath,
+                    properties.TryGetValue("UUID", out var uuid) ? uuid.ToString() : null,
+                    properties.TryGetValue("Codec", out var c) ? (byte)c : (byte)0,
+                    properties.TryGetValue("Capabilities", out var caps) ? (byte[])caps : null
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to parse MediaEndpoint info for {ObjectPath}", objectPath);
+                return null;
+            }
+        }
+
+        private Task<List<AudioCodec>> ParseCodecsFromEndpointAsync(MediaEndpointInfo endpoint, CancellationToken cancellationToken)
+        {
+            var codecs = new List<AudioCodec>();
+            try
+            {
+                var codecInfo = ParseA2dpCodecInfo(endpoint.Codec, endpoint.Capabilities);
+                if (codecInfo != null) codecs.Add(codecInfo);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to parse codec from endpoint {ObjectPath}", endpoint.ObjectPath);
+            }
+            return Task.FromResult(codecs);
+        }
+
+        private Task<AudioCodec> GetCodecFromTransportAsync(MediaTransportInfo transport, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Task.FromResult(ParseA2dpCodecInfo(transport.Codec, transport.Configuration));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to get codec from transport {ObjectPath}", transport.ObjectPath);
+                return Task.FromResult<AudioCodec>(null);
+            }
+        }
+
+        private AudioCodec ParseA2dpCodecInfo(byte codecId, byte[] configuration)
+        {
+            switch (codecId)
+            {
+                case 0x00: return new AudioCodec("SBC", 328, "Standard");
+                case 0x01: return new AudioCodec("MP3", 320, "Standard");
+                case 0x02: return new AudioCodec("AAC", 320, "High");
+                case 0x40: return new AudioCodec("aptX", 352, "High");
+                case 0x41: return new AudioCodec("aptX HD", 576, "Lossless");
+                case 0xAA: return new AudioCodec("LDAC", 990, "Lossless");
+                default: return new AudioCodec($"Unknown (0x{codecId:X2})", 0, "Unknown");
+            }
+        }
+
+        #endregion
 
         /// <summary>
         /// Gets the UUID string for the specified audio profile.
