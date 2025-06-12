@@ -7,7 +7,6 @@ using BlueZNet.Models.Config;
 using BlueZNet.Models.Media;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,8 +19,6 @@ namespace BlueZNet.Services
     /// </summary>
     public class DefaultAudioStreamMonitor : IAudioStreamMonitor, IDisposable
     {
-        private const int AudioStreamMonitorIntervalSeconds = 5;
-
         private readonly ILogger _logger;
         private readonly IPulseAudioService _pulseAudioService;
         private readonly IBlueZDeviceManager _deviceManager;
@@ -251,7 +248,7 @@ namespace BlueZNet.Services
                     deviceAddress, capabilities.ActiveCodec?.Name ?? "Unknown", codecName);
 
                 // Attempt codec switching through BlueZ MediaTransport reconfiguration
-                return await ReconfigureMediaTransportCodecAsync(activeTransport, targetCodec, cancellationToken);
+                return await ReconfigureMediaTransportCodecAsync(activeTransport, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -287,26 +284,24 @@ namespace BlueZNet.Services
         /// <summary>
         /// Attempts to reconfigure the media transport to use a different codec.
         /// </summary>
-        private async Task<bool> ReconfigureMediaTransportCodecAsync(MediaTransportInfo transport, AudioCodec targetCodec, CancellationToken cancellationToken)
+        private async Task<bool> ReconfigureMediaTransportCodecAsync(MediaTransportInfo transport, CancellationToken cancellationToken)
         {
             try
             {
-                _logger.LogInformation("Attempting to reconfigure transport {ObjectPath} to use codec {CodecName}",
-                    transport.ObjectPath, targetCodec.Name);
+                _logger.LogInformation("Attempting to reconfigure transport {ObjectPath} to renegotiate codec", transport.ObjectPath);
 
                 // This is a complex operation that typically requires:
                 // 1. Releasing the current transport
                 // 2. Finding/configuring appropriate endpoint for target codec
                 // 3. Establishing new transport with target codec
 
-                // For now, we'll try a simpler approach: disconnect and reconnect
+                // For now, we'll try a simpler approach: cycle the transport connection
                 // which may trigger codec renegotiation
                 return await TriggerCodecRenegotiationAsync(transport, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to reconfigure transport {ObjectPath} for codec {CodecName}",
-                    transport.ObjectPath, targetCodec.Name);
+                _logger.LogError(ex, "Failed to reconfigure transport {ObjectPath}", transport.ObjectPath);
                 return false;
             }
         }
