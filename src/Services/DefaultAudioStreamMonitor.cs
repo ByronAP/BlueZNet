@@ -92,7 +92,7 @@ namespace BlueZNet.Services
             try
             {
                 _logger.LogDebug("Starting audio stream monitoring");
-
+                _connection = await _dbusFactory.CreateSystemConnectionAsync(cancellationToken);
                 _monitoringCancellationTokenSource = new CancellationTokenSource();
                 StartAudioStreamMonitoring();
 
