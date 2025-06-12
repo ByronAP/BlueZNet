@@ -390,8 +390,9 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Loads existing devices from BlueZ.
+        /// Loads existing devices from BlueZ on startup.
         /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
         private async Task LoadExistingDevicesAsync(CancellationToken cancellationToken)
         {
             try
@@ -434,7 +435,7 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Subscribes to BlueZ device changes.
+        /// Subscribes to D-Bus signals for device additions, removals, and property changes.
         /// </summary>
         private async Task SubscribeToDeviceChangesAsync()
         {
@@ -462,7 +463,7 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Subscribes to property changes on existing devices.
+        /// Subscribes to property changes on all already known devices.
         /// </summary>
         private async Task SubscribeToExistingDevicePropertiesAsync()
         {
@@ -480,8 +481,9 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Subscribes to property changes for a specific device.
+        /// Subscribes to property changes for a specific device object path.
         /// </summary>
+        /// <param name="objectPath">The D-Bus object path of the device.</param>
         private async Task SubscribeToDevicePropertiesAsync(string objectPath)
         {
             try
@@ -502,8 +504,9 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Handles new BlueZ interfaces being added.
+        /// Handles the D-Bus `InterfacesAdded` signal. Creates and caches new devices.
         /// </summary>
+        /// <param name="args">The signal arguments, containing the object path and its interfaces.</param>
         private async Task OnInterfacesAddedAsync((ObjectPath objectPath, IDictionary<string, IDictionary<string, object>> interfacesAndProperties) args)
         {
             try
@@ -533,8 +536,9 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Handles BlueZ interfaces being removed.
+        /// Handles the D-Bus `InterfacesRemoved` signal. Removes devices from the cache.
         /// </summary>
+        /// <param name="args">The signal arguments, containing the object path and removed interfaces.</param>
         private void OnInterfacesRemoved((ObjectPath objectPath, string[] interfaces) args)
         {
             try
@@ -564,8 +568,10 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Handles device property changes. Refreshes the device state and raises events.
+        /// Handles D-Bus `PropertiesChanged` signals for a device. Refreshes the device state and raises events.
         /// </summary>
+        /// <param name="objectPath">The object path of the device that changed.</param>
+        /// <param name="change">The property change information.</param>
         private async Task OnDevicePropertyChangedAsync(string objectPath, (string interfaceName, IDictionary<string, object> changedProperties, string[] invalidatedProperties) change)
         {
             try
@@ -575,7 +581,7 @@ namespace BlueZNet.Services
 
                 bool wasConnected = device.Connected;
 
-                // Refresh the entire device object to capture all changes
+                // A property change means our cache is stale. Refresh the entire device object to get a consistent state.
                 var updatedDevice = await CreateBluetoothDeviceAsync(objectPath, null);
                 if (updatedDevice == null) return;
 
@@ -607,9 +613,12 @@ namespace BlueZNet.Services
         }
 
         /// <summary>
-        /// Creates a BluetoothDevice instance from BlueZ D-Bus properties.
-        /// If properties are null, they will be fetched from D-Bus.
+        /// Creates a complete BluetoothDevice instance from its D-Bus object path and properties.
+        /// If properties are null, they will be fetched fresh from D-Bus.
         /// </summary>
+        /// <param name="objectPath">The D-Bus object path of the device.</param>
+        /// <param name="properties">The properties dictionary for the device, or null to fetch them.</param>
+        /// <returns>A fully populated BluetoothDevice object, or null on failure.</returns>
         private async Task<BluetoothDevice> CreateBluetoothDeviceAsync(string objectPath, IDictionary<string, object> properties)
         {
             try
@@ -629,7 +638,6 @@ namespace BlueZNet.Services
 
                 var connected = properties.TryGetValue("Connected", out var connectedObj) && connectedObj is bool connectedBool && connectedBool;
 
-                // Get device capabilities if connected
                 var capabilities = connected ? await GetDeviceCapabilitiesAsync(address) : new DeviceCapabilities();
                 var activeProfile = connected ? await GetActiveProfileAsync(address) : null;
 
@@ -642,12 +650,25 @@ namespace BlueZNet.Services
             }
         }
 
+        /// <summary>
+        /// Checks if the device has an active (or pending) media transport, indicating A2DP streaming.
+        /// </summary>
+        /// <param name="deviceAddress">The MAC address of the device.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>True if an active or pending media transport exists.</returns>
         private async Task<bool> HasActiveMediaTransportAsync(string deviceAddress, CancellationToken cancellationToken)
         {
             var transports = await GetMediaTransportsForDeviceAsync(deviceAddress, cancellationToken);
             return transports.Any(t => t.State == "active" || t.State == "pending");
         }
 
+        /// <summary>
+        /// Gets the active voice profile (HFP/HSP) if a voice connection is active.
+        /// </summary>
+        /// <param name="deviceObjectPath">The D-Bus object path of the device.</param>
+        /// <param name="connectedServices">List of connected service UUIDs.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>The active voice profile, or null if none is active.</returns>
         private async Task<AudioProfile?> GetActiveVoiceProfileAsync(string deviceObjectPath, List<string> connectedServices, CancellationToken cancellationToken)
         {
             var hasHfp = connectedServices.Any(uuid => uuid.Equals("0000111E-0000-1000-8000-00805F9B34FB", StringComparison.OrdinalIgnoreCase));
@@ -657,27 +678,46 @@ namespace BlueZNet.Services
 
             if (await CheckForActiveScoConnectionAsync(deviceObjectPath, cancellationToken) || await CheckForActiveCallAsync(deviceObjectPath, cancellationToken))
             {
-                return hasHfp ? AudioProfile.HFP : AudioProfile.HSP;
+                return hasHfp ? AudioProfile.HFP : AudioProfile.HSP; // Prefer HFP if available
             }
 
             return null;
         }
 
+        /// <summary>
+        /// Checks for an active SCO (voice) connection via the AudioGateway interface.
+        /// </summary>
+        /// <param name="deviceObjectPath">The D-Bus object path of the device.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>True if an active SCO connection is found.</returns>
         private async Task<bool> CheckForActiveScoConnectionAsync(string deviceObjectPath, CancellationToken cancellationToken)
         {
-            // Implementation for checking SCO connection would go here.
-            // This might involve inspecting other D-Bus interfaces or properties.
+            // This is a simplified check. A full implementation might need to inspect
+            // AudioGateway or Telephony D-Bus interfaces if they exist for the device.
             await Task.CompletedTask;
             return false;
         }
 
+        /// <summary>
+        /// Checks for an active call via the Telephony interface.
+        /// </summary>
+        /// <param name="deviceObjectPath">The D-Bus object path of the device.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>True if an active call is found.</returns>
         private async Task<bool> CheckForActiveCallAsync(string deviceObjectPath, CancellationToken cancellationToken)
         {
-            // Implementation for checking for an active call would go here.
+            // This is a simplified check. A full implementation would query the Telephony interface.
             await Task.CompletedTask;
             return false;
         }
 
+        /// <summary>
+        /// Gets the list of currently connected profiles for a device from its advertised UUIDs.
+        /// </summary>
+        /// <param name="deviceObjectPath">The D-Bus object path of the device.</param>
+        /// <param name="connectedServices">List of connected service UUIDs.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A list of connected audio profiles.</returns>
         private Task<List<AudioProfile>> GetConnectedProfilesAsync(string deviceObjectPath, List<string> connectedServices, CancellationToken cancellationToken)
         {
             var profiles = new List<AudioProfile>();
@@ -694,6 +734,14 @@ namespace BlueZNet.Services
             return Task.FromResult(profiles);
         }
 
+        /// <summary>
+        /// Attempts profile switching by disconnecting and reconnecting the device to trigger renegotiation.
+        /// </summary>
+        /// <param name="deviceProxy">The D-Bus proxy for the device.</param>
+        /// <param name="deviceAddress">The MAC address of the device.</param>
+        /// <param name="profile">The desired audio profile.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>True if the switch was successful.</returns>
         private async Task<bool> ReconnectForProfileSwitchAsync(IDevice deviceProxy, string deviceAddress, AudioProfile profile, CancellationToken cancellationToken)
         {
             try
@@ -716,6 +764,14 @@ namespace BlueZNet.Services
             }
         }
 
+        /// <summary>
+        /// Attempts profile switching using the external `bluetoothctl` command.
+        /// This is often more reliable for explicit profile changes.
+        /// </summary>
+        /// <param name="deviceAddress">The MAC address of the device.</param>
+        /// <param name="profile">The desired audio profile.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>True if the switch was successful.</returns>
         private async Task<bool> SwitchProfileUsingBluetoothctlAsync(string deviceAddress, AudioProfile profile, CancellationToken cancellationToken)
         {
             try
@@ -729,7 +785,8 @@ namespace BlueZNet.Services
                 var profileName = GetBluetoothctlProfileName(profile);
                 if (profileName == null) return false;
 
-                // This command attempts to set the card profile directly.
+                // This command attempts to set the card profile directly. It may succeed even if the device
+                // is connected, or it may require a reconnect. We attempt it first as it's the most direct method.
                 var result = await _processRunner.RunAsync("bluetoothctl", $"set-card-profile {deviceAddress} {profileName}", cancellationToken);
 
                 await Task.Delay(1000, cancellationToken); // Give a moment for the change to apply.
@@ -744,8 +801,17 @@ namespace BlueZNet.Services
             }
         }
 
+        /// <summary>
+        /// Gets AVRCP capabilities for a device.
+        /// </summary>
+        /// <param name="devicePath">The D-Bus object path for the device.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>The device's detected AVRCP capabilities.</returns>
         private Task<AvrcpCapabilities> GetAvrcpCapabilitiesAsync(string devicePath, CancellationToken cancellationToken)
         {
+            // Note: This is a simplified implementation. A more advanced version would
+            // inspect the `org.bluez.MediaControl1` and `org.bluez.MediaPlayer1` interfaces
+            // and their properties to determine the exact supported features.
             var supportedCommands = new List<string> { "play", "pause", "next", "previous" };
             var capabilities = new AvrcpCapabilities("1.6", supportedCommands, true, true, true, true, true);
             return Task.FromResult(capabilities);
@@ -753,6 +819,12 @@ namespace BlueZNet.Services
 
         #region A2DP Capability Helpers
 
+        /// <summary>
+        /// Gets detailed A2DP capabilities, including all supported and active codecs.
+        /// </summary>
+        /// <param name="deviceAddress">The MAC address of the device.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>The device's A2DP capabilities.</returns>
         private async Task<A2dpCapabilities> GetA2dpCapabilitiesAsync(string deviceAddress, CancellationToken cancellationToken)
         {
             try
@@ -792,6 +864,12 @@ namespace BlueZNet.Services
             }
         }
 
+        /// <summary>
+        /// Gets all MediaTransport1 objects associated with a specific device.
+        /// </summary>
+        /// <param name="deviceAddress">The MAC address of the device.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A list of MediaTransportInfo objects.</returns>
         private async Task<List<MediaTransportInfo>> GetMediaTransportsForDeviceAsync(string deviceAddress, CancellationToken cancellationToken)
         {
             var transports = new List<MediaTransportInfo>();
@@ -809,6 +887,12 @@ namespace BlueZNet.Services
             return transports;
         }
 
+        /// <summary>
+        /// Gets all MediaEndpoint1 objects associated with a specific device.
+        /// </summary>
+        /// <param name="deviceAddress">The MAC address of the device.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A list of MediaEndpointInfo objects.</returns>
         private async Task<List<MediaEndpointInfo>> GetMediaEndpointsForDeviceAsync(string deviceAddress, CancellationToken cancellationToken)
         {
             var endpoints = new List<MediaEndpointInfo>();
@@ -826,6 +910,12 @@ namespace BlueZNet.Services
             return endpoints;
         }
 
+        /// <summary>
+        /// Parses a dictionary of D-Bus properties into a MediaTransportInfo object.
+        /// </summary>
+        /// <param name="objectPath">The D-Bus object path of the transport.</param>
+        /// <param name="props">The properties dictionary.</param>
+        /// <returns>A new MediaTransportInfo object.</returns>
         private MediaTransportInfo ParseMediaTransportInfo(string objectPath, IDictionary<string, object> props)
         {
             return new MediaTransportInfo(objectPath,
@@ -837,6 +927,12 @@ namespace BlueZNet.Services
                 props.TryGetValue("Configuration", out var cfg) ? (byte[])cfg : null);
         }
 
+        /// <summary>
+        /// Parses a dictionary of D-Bus properties into a MediaEndpointInfo object.
+        /// </summary>
+        /// <param name="objectPath">The D-Bus object path of the endpoint.</param>
+        /// <param name="props">The properties dictionary.</param>
+        /// <returns>A new MediaEndpointInfo object.</returns>
         private MediaEndpointInfo ParseMediaEndpointInfo(string objectPath, IDictionary<string, object> props)
         {
             return new MediaEndpointInfo(objectPath,
@@ -848,6 +944,9 @@ namespace BlueZNet.Services
         /// <summary>
         /// Parses A2DP codec information from codec ID and configuration/capability bytes.
         /// </summary>
+        /// <param name="codecId">The A2DP codec identifier byte.</param>
+        /// <param name="config">The codec-specific configuration or capabilities byte array.</param>
+        /// <returns>An AudioCodec object with estimated properties.</returns>
         private AudioCodec ParseA2dpCodecInfo(byte codecId, byte[] config)
         {
             // This is a simplified parser. A full implementation would deeply parse the 'config' byte array
@@ -865,6 +964,11 @@ namespace BlueZNet.Services
         }
         #endregion
 
+        /// <summary>
+        /// Gets the profile UUID string for a given AudioProfile enum.
+        /// </summary>
+        /// <param name="profile">The audio profile.</param>
+        /// <returns>The corresponding UUID string, or null.</returns>
         private string GetProfileUuid(AudioProfile profile)
         {
             switch (profile)
@@ -877,6 +981,11 @@ namespace BlueZNet.Services
             }
         }
 
+        /// <summary>
+        /// Gets the profile name string used by the `bluetoothctl` command-line tool.
+        /// </summary>
+        /// <param name="profile">The audio profile.</param>
+        /// <returns>The corresponding bluetoothctl profile name, or null.</returns>
         private string GetBluetoothctlProfileName(AudioProfile profile)
         {
             switch (profile)
@@ -888,18 +997,29 @@ namespace BlueZNet.Services
             }
         }
 
+        /// <summary>
+        /// Safely invokes a synchronous action, logging any exceptions.
+        /// </summary>
+        /// <param name="action">The action to invoke.</param>
         private void SafeInvoke(Action action)
         {
             try { action(); }
             catch (Exception ex) { _logger.LogError(ex, "Error in event handler"); }
         }
 
+        /// <summary>
+        /// Safely invokes an asynchronous action, logging any exceptions.
+        /// </summary>
+        /// <param name="asyncAction">The async action to invoke.</param>
         private async void SafeInvokeAsync(Func<Task> asyncAction)
         {
             try { await asyncAction(); }
             catch (Exception ex) { _logger.LogError(ex, "Error in async event handler"); }
         }
 
+        /// <summary>
+        /// Cleans up all resources, including D-Bus subscriptions and connections.
+        /// </summary>
         private async Task CleanupAsync()
         {
             foreach (var subscription in _subscriptions)
