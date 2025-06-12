@@ -381,25 +381,8 @@ namespace BlueZNet.Services
         /// <inheritdoc />
         public async Task<DeviceCapabilities> GetDeviceCapabilitiesAsync(string deviceAddress, CancellationToken cancellationToken = default)
         {
-            // Get base capabilities from the device manager
-            var baseCapabilities = await _deviceManager.GetDeviceCapabilitiesAsync(deviceAddress, cancellationToken);
-            if (baseCapabilities == null)
-            {
-                // Device not found or other error, return empty capabilities.
-                return new DeviceCapabilities();
-            }
-
-            // Get A2DP capabilities from the audio monitor
-            var a2dpCapabilities = await _audioStreamMonitor.GetAudioCodecInfoAsync(deviceAddress, cancellationToken);
-
-            // Combine them into a single comprehensive object
-            return new DeviceCapabilities(
-                baseCapabilities.Avrcp,
-                a2dpCapabilities,
-                baseCapabilities.SupportedProfiles,
-                baseCapabilities.SupportsAbsoluteVolume,
-                baseCapabilities.SupportsBrowsing,
-                baseCapabilities.SupportsSearch);
+            // The device manager is the single source of truth for all capabilities.
+            return await _deviceManager.GetDeviceCapabilitiesAsync(deviceAddress, cancellationToken);
         }
 
         /// <inheritdoc />
