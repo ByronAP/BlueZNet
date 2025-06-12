@@ -27,35 +27,35 @@ echo "=== BlueZNet System Diagnostics ==="
 echo
 
 # Check BlueZ
-echo "BlueZ Status:"
+echo "--- BlueZ Status ---"
 bluetoothd -v
-sudo systemctl status bluetooth | grep -E "(Active:|experimental)"
+sudo systemctl status bluetooth | grep -E "(Active:|ExecStart=)"
 echo
 
 # Check PulseAudio
-echo "PulseAudio Status:"
+echo "--- PulseAudio Status ---"
 pulseaudio --version
-systemctl status pulseaudio
+systemctl --user status pulseaudio || systemctl status pulseaudio
 echo
 
 # Check Bluetooth hardware
-echo "Bluetooth Hardware:"
-hciconfig -a
+echo "--- Bluetooth Hardware ---"
+bluetoothctl show
 echo
 
 # Check D-Bus
-echo "D-Bus Status:"
+echo "--- D-Bus Status ---"
 systemctl status dbus
 echo
 
 # Check permissions
-echo "User Groups:"
-groups $USER | grep -E "(audio|bluetooth|pulse)"
+echo "--- User Groups ---"
+groups $USER | grep -E "(audio|bluetooth|pulse)" || echo "User may be missing required groups."
 echo
 
 # Check for LADSPA plugins
-echo "LADSPA Plugins:"
-ls /usr/lib/ladspa/ 2>/dev/null | grep -E "(sc4|gate)" || echo "No LADSPA plugins found"
+echo "--- LADSPA Plugins ---"
+ls /usr/lib/ladspa/ 2>/dev/null | grep -E "(sc4|gate)" || echo "LADSPA audio processing plugins not found."
 ```
 
 ---
@@ -66,13 +66,13 @@ ls /usr/lib/ladspa/ 2>/dev/null | grep -E "(sc4|gate)" || echo "No LADSPA plugin
 
 **Symptom:**
 ```
-The framework 'Microsoft.NETCore.App', version '9.0.0' was not found.
+The framework 'Microsoft.NETCore.App', version '[x.x.x]' was not found.
 ```
 
 **Solution:**
 ```bash
-# Install .NET 9 runtime
-curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 9.0
+# Install .NET runtime
+curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 8.0
 echo 'export PATH=$PATH:$HOME/.dotnet' >> ~/.bashrc
 source ~/.bashrc
 
@@ -90,16 +90,16 @@ bluetoothd: command not found
 **Solution:**
 ```bash
 # Check BlueZ version
-bluetoothd -v
+bluetoothd --version
 
 # If not installed or old version
 sudo apt update
 sudo apt install bluez bluez-tools
 
-# For latest version on older distros
-sudo add-apt-repository ppa:bluetooth/bluez
-sudo apt update
-sudo apt upgrade bluez
+# For latest version on older distros (e.g., Ubuntu LTS)
+# sudo add-apt-repository ppa:bluetooth/bluez
+# sudo apt update
+# sudo apt upgrade bluez
 ```
 
 ### Missing Dependencies
@@ -145,12 +145,10 @@ sudo systemctl enable bluetooth
 #### 2. Experimental Features Not Enabled
 ```bash
 # Check if experimental is enabled
-ps aux | grep bluetoothd | grep experimental
+sudo systemctl status bluetooth | grep experimental
 
-# If not, enable it
-sudo systemctl edit --full bluetooth.service
-# Add --experimental to ExecStart line
-
+# If not, enable it (see setup.md)
+sudo sed -i 's|ExecStart=/usr/lib/bluetooth/bluetoothd.*|ExecStart=/usr/lib/bluetooth/bluetoothd --experimental|g' /lib/systemd/system/bluetooth.service
 sudo systemctl daemon-reload
 sudo systemctl restart bluetooth
 ```
@@ -163,8 +161,9 @@ systemctl status dbus
 # Test D-Bus access
 dbus-send --system --dest=org.bluez --print-reply / org.freedesktop.DBus.ObjectManager.GetManagedObjects
 
-# If permission denied, check policy files
-ls -la /etc/dbus-1/system.d/*bluetooth*
+# If permission denied, check D-Bus policy files and user groups
+ls -la /etc/dbus-1/system.d/*
+groups $USER
 ```
 
 ### "No Bluetooth adapter found"
@@ -186,10 +185,10 @@ lsmod | grep bluetooth
 sudo modprobe bluetooth
 
 # Reset Bluetooth adapter
-sudo hciconfig hci0 reset
-sudo hciconfig hci0 up
+sudo bluetoothctl power off
+sudo bluetoothctl power on
 
-# Check for firmware issues
+# Check for hardware issues
 dmesg | grep -i bluetooth
 ```
 
@@ -244,19 +243,23 @@ if (!caps.Avrcp.SupportsPlayback)
 bluetoothctl info XX:XX:XX:XX:XX:XX | grep "UUID"
 
 # Ensure A2DP and AVRCP are connected
-# UUID: Audio Sink                (0000110b-0000-1000-8000-00805f9b34fb)
-# UUID: A/V Remote Control        (0000110e-0000-1000-8000-00805f9b34fb)
+# UUID: Audio Sink                (0000110b-...)
+# UUID: A/V Remote Control        (0000110e-...)
 ```
 
 #### 3. Media Player Not Ready
 ```csharp
-// Wait for media player to be available
-controller.MediaPlaybackChanged += async (s, e) =>
+// Wait for media player to be available after connection
+controller.DeviceConnectionChanged += async (s, e) =>
 {
-    if (e.MediaPlayer != null && e.MediaPlayer.Status != null)
+    if (e.IsConnected)
     {
-        // Now safe to send commands
-        await controller.PlayAsync(e.Device.Address);
+        await Task.Delay(2000); // Wait 2s for services to stabilize
+        var caps = await controller.GetDeviceCapabilitiesAsync(e.Device.Address);
+        if (caps.Avrcp.SupportsPlayback)
+        {
+            await controller.PlayAsync(e.Device.Address);
+        }
     }
 };
 ```
@@ -274,7 +277,6 @@ var caps = await controller.GetDeviceCapabilitiesAsync(deviceAddress);
 if (!caps.SupportsAbsoluteVolume)
 {
     Console.WriteLine("Device doesn't support AVRCP absolute volume");
-    // Volume might only work via PulseAudio
 }
 ```
 
@@ -284,7 +286,7 @@ if (!caps.SupportsAbsoluteVolume)
 pactl list short sinks | grep bluez
 
 # Manually set volume
-pactl set-sink-volume bluez_sink.XX_XX_XX_XX_XX_XX 50%
+pactl set-sink-volume bluez_sink.XX_XX_XX_XX_XX_XX.a2dp_sink 50%
 
 # Check if sink is suspended
 pactl list sinks | grep -A 10 bluez
@@ -332,13 +334,10 @@ GetAudioStreamInfoAsync returns null
 #### 1. PulseAudio Not Running
 ```bash
 # Check PulseAudio
-systemctl --user status pulseaudio
-
-# Or in system mode
-systemctl status pulseaudio
+systemctl --user status pulseaudio || systemctl status pulseaudio
 
 # Start if needed
-pulseaudio --start
+systemctl --user start pulseaudio || sudo systemctl start pulseaudio
 ```
 
 #### 2. Bluetooth Module Not Loaded
@@ -348,7 +347,6 @@ pactl list short modules | grep bluetooth
 
 # Load if missing
 pactl load-module module-bluetooth-discover
-pactl load-module module-bluetooth-policy
 ```
 
 #### 3. Wrong Audio Profile
@@ -365,22 +363,16 @@ if (profile != AudioProfile.A2DP)
 
 **Solutions:**
 
-#### 1. Increase Bluetooth MTU
-```bash
-# Edit /etc/bluetooth/main.conf
-[LE]
-MinConnectionInterval=6
-MaxConnectionInterval=9
-ConnectionLatency=0
-ConnectionSupervisionTimeout=200
-```
+#### 1. Wi-Fi Interference
+- If using a Raspberry Pi, try using the 5GHz Wi-Fi band, as 2.4GHz can interfere with Bluetooth.
 
 #### 2. Adjust PulseAudio Latency
 ```bash
 # Edit /etc/pulse/daemon.conf
-default-fragments = 8
-default-fragment-size-msec = 10
+default-fragments = 5
+default-fragment-size-msec = 25
 ```
+Restart PulseAudio after changes.
 
 #### 3. CPU Governor
 ```bash
@@ -397,17 +389,15 @@ SetDynamicRangeCompressionAsync returns false
 
 ```bash
 # Install LADSPA plugins
-sudo apt install ladspa-sdk swh-plugins cmt tap-plugins
+sudo apt install ladspa-sdk swh-plugins cmt
 
 # Verify plugins
 listplugins | grep -E "(sc4|gate)"
 
 # Test manually
 pactl load-module module-ladspa-sink \
-  sink_name=compressed_sink \
-  plugin=sc4_1882 \
-  label=sc4 \
-  control=1,1.5,401,-30,20,5,12
+  sink_name=compressed_sink master=bluez_sink.XX_XX_XX_XX_XX_XX.a2dp_sink \
+  plugin=sc4_1882 label=sc4 control=1,1.5,401,-30,20,5,12
 ```
 
 ---
@@ -418,24 +408,14 @@ pactl load-module module-ladspa-sink \
 
 **Common Causes:**
 
-#### 1. Audio Stream Monitoring Too Frequent
-```csharp
-// The library polls every 5 seconds by default
-// If you need to modify, fork and change:
-private const int AudioStreamMonitorIntervalSeconds = 5; // Increase if needed
-```
-
-#### 2. Too Many Event Handlers
-```csharp
-// Ensure you unsubscribe when done
-controller.MediaPlaybackChanged -= MyHandler;
-```
-
-#### 3. Debug Logging
+#### 1. Debug Logging Enabled
 ```csharp
 // Use appropriate log level in production
-.SetMinimumLevel(LogLevel.Warning) // Not Debug
+.SetMinimumLevel(LogLevel.Information) // Not Debug or Trace
 ```
+
+#### 2. Frequent Polling in App Logic
+- Avoid tight loops calling `GetConnectedDevicesAsync` or other methods. Rely on the library's events instead.
 
 ### Memory Leaks
 
@@ -497,40 +477,26 @@ public async Task<DeviceCapabilities> GetCachedCapabilitiesAsync(string deviceAd
 
 1. **Won't connect after pairing**
    ```bash
-   # Trust is crucial for iOS
+   # 'trust' is crucial for iOS automatic reconnection
    bluetoothctl trust XX:XX:XX:XX:XX:XX
    ```
 
 2. **Media control works intermittently**
-   - iOS aggressively manages Bluetooth connections
-   - Ensure phone is unlocked during initial connection
-   - Keep Music app in background
+   - iOS aggressively manages Bluetooth connections.
+   - Ensure phone is unlocked during initial connection.
+   - Keep the Music app in the foreground or background.
 
 ### Android Issues
 
 **Common Problems:**
 
 1. **YouTube Music doesn't support browsing**
-   ```csharp
-   // This is expected - YouTube Music doesn't implement browsing
-   // Only playback control works
-   ```
+   - This is expected behavior. Only playback control works.
 
 2. **Some commands work, others don't**
-   - Check Android Bluetooth settings
-   - Enable "Media audio" and "Contact sharing"
-   - Some Android skins limit AVRCP features
-
-### Bluetooth Speakers/Headphones
-
-**When Pi connects TO speakers (role reversal):**
-
-```bash
-# Configure Pi as audio source
-# Edit /etc/bluetooth/audio.conf
-[General]
-Enable=Source
-```
+   - Check Android Bluetooth settings for the device.
+   - Enable "Media audio" and "Contact sharing".
+   - Some Android skins limit AVRCP features.
 
 ---
 
@@ -539,35 +505,17 @@ Enable=Source
 ### Common Exceptions and Solutions
 
 #### BlueZNetException
-```
-BlueZNetException: Failed to start Bluetooth monitoring
-```
-- Check BlueZ service is running
-- Verify experimental features enabled
-- Check D-Bus permissions
+- Check BlueZ service is running.
+- Verify experimental features are enabled.
+- Check D-Bus permissions.
 
 #### InvalidOperationException
-```
-InvalidOperationException: Connection not initialized
-```
-- Ensure StartMonitoringAsync completed successfully
-- Don't call methods before monitoring starts
+- Ensure `StartMonitoringAsync` completed successfully before calling other methods.
 
-#### DBusException
-```
-DBusException: org.bluez.Error.NotReady
-```
-- Device not fully connected yet
-- Wait for DeviceConnectionChanged event
-- Add delay after connection
-
-#### TimeoutException
-```
-The operation has timed out
-```
-- Use CancellationToken with reasonable timeout
-- Check if device is in range
-- Verify device isn't in power-saving mode
+#### Tmds.DBus.DBusException
+- `org.bluez.Error.NotReady`: Device is not fully connected. Wait for `DeviceConnectionChanged` or add a delay.
+- `org.bluez.Error.Failed`: A generic BlueZ error. Check `journalctl -u bluetooth` for details.
+- `org.freedesktop.DBus.Error.AccessDenied`: Your user doesn't have permission. Check D-Bus policies and user groups.
 
 ---
 
@@ -581,9 +529,7 @@ var loggerFactory = LoggerFactory.Create(builder =>
 {
     builder
         .AddConsole()
-        .AddDebug()
-        .SetMinimumLevel(LogLevel.Trace)
-        .AddFilter("BlueZNet", LogLevel.Debug);
+        .SetMinimumLevel(LogLevel.Trace);
 });
 ```
 
@@ -591,10 +537,10 @@ var loggerFactory = LoggerFactory.Create(builder =>
 
 ```bash
 # Monitor all BlueZ traffic
-sudo dbus-monitor --system "interface='org.bluez.Device1'" | grep -A 5 -B 5 "member="
+sudo dbus-monitor --system "interface='org.bluez.Device1'"
 
-# Monitor specific device
-sudo dbus-monitor --system "path='/org/bluez/hci0/dev_XX_XX_XX_XX_XX_XX'"
+# Monitor media player messages for a specific device
+sudo dbus-monitor --system "interface='org.bluez.MediaPlayer1',path='/org/bluez/hci0/dev_XX_XX_XX_XX_XX_XX/player0'"
 ```
 
 ### BlueZ Debug Mode
@@ -611,13 +557,8 @@ sudo journalctl -u bluetooth -f
 ### Packet-Level Debugging
 
 ```bash
-# Install btmon
-sudo apt install bluez-hcidump
-
 # Monitor Bluetooth packets
 sudo btmon
-
-# In another terminal, reproduce the issue
 ```
 
 ### PulseAudio Debugging
@@ -628,45 +569,6 @@ pulseaudio -k
 
 # Run in verbose mode
 pulseaudio -vvv
-
-# Check for errors during operations
-```
-
-### Create Minimal Test Case
-
-```csharp
-// Minimal test to isolate issues
-class MinimalTest
-{
-    static async Task Main(string[] args)
-    {
-        var logger = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug))
-            .CreateLogger<BlueZNetControllerService>();
-            
-        using var controller = new BlueZNetControllerService(logger);
-        
-        try
-        {
-            await controller.StartMonitoringAsync();
-            Console.WriteLine("Started successfully");
-            
-            var devices = await controller.GetConnectedDevicesAsync();
-            Console.WriteLine($"Found {devices.Count} devices");
-            
-            foreach (var device in devices)
-            {
-                Console.WriteLine($"- {device.Name} ({device.Address})");
-                var caps = await controller.GetDeviceCapabilitiesAsync(device.Address);
-                Console.WriteLine($"  AVRCP: {caps.Avrcp.Version}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
-            Console.WriteLine(ex.StackTrace);
-        }
-    }
-}
 ```
 
 ---
@@ -675,96 +577,18 @@ class MinimalTest
 
 ### Library Limitations
 
-1. **No Bluetooth Classic Scanning**
-   - Use bluetoothctl for device discovery
-   - Library focuses on managing already-paired devices
-
-2. **No Direct Pairing Support**
-   - Pair devices using bluetoothctl or GUI
-   - Library handles post-pairing operations
-
-3. **Limited Codec Control**
-   - Codec switching requires reconnection
-   - Not all devices support codec selection
-
-4. **Single Instance per Process**
-   - One IBlueZNetController per application
-   - Multiple instances may conflict
+1. **No Bluetooth Classic Scanning**: Use `bluetoothctl` for device discovery. The library manages already-paired devices.
+2. **No Direct Pairing Support**: Pair devices using `bluetoothctl` or a GUI.
+3. **Limited Codec Control**: Codec switching requires reconnection and is not guaranteed to work on all devices.
+4. **Single Instance per Process**: Only one `IBlueZNetController` should be active per application to avoid conflicts.
 
 ### Platform Limitations
 
-1. **Raspberry Pi Bluetooth**
-   - Built-in Bluetooth has limited bandwidth
-   - Consider USB Bluetooth adapter for better performance
-
-2. **Virtual Machines**
-   - Bluetooth passthrough often problematic
-   - Test on physical hardware
-
-3. **WSL (Windows Subsystem for Linux)**
-   - No Bluetooth support in WSL 1/2
-   - Use native Linux for development
+1. **Raspberry Pi Bluetooth**: The built-in chip has limited bandwidth. Consider a USB Bluetooth adapter for high-quality audio or multiple connections.
+2. **Virtual Machines**: Bluetooth passthrough is often problematic. Testing on physical hardware is recommended.
+3. **WSL (Windows Subsystem for Linux)**: Does not have direct Bluetooth hardware access.
 
 ### Protocol Limitations
 
-1. **AVRCP Versions**
-   - Older devices may only support AVRCP 1.3
-   - No browsing in AVRCP < 1.4
-   - Position info requires AVRCP 1.3+
-
-2. **Media App Support**
-   - Streaming apps may limit AVRCP features
-   - DRM content may block metadata
-   - Some apps don't implement browsing
-
----
-
-## Getting Help
-
-### Before Asking for Help
-
-1. **Run diagnostics script** (see top of this guide)
-2. **Check all log outputs** with debug logging enabled
-3. **Test with different devices** to isolate issue
-4. **Create minimal reproduction** case
-5. **Document your environment**:
-   - Linux distribution and version
-   - .NET version (`dotnet --info`)
-   - BlueZ version (`bluetoothd -v`)
-   - Device make/model
-   - Relevant configuration files
-
-### Where to Get Help
-
-1. **GitHub Issues**: [https://github.com/ByronAP/BlueZNet/issues](https://github.com/ByronAP/BlueZNet/issues)
-2. **Discussions**: [https://github.com/ByronAP/BlueZNet/discussions](https://github.com/ByronAP/BlueZNet/discussions)
-3. **Stack Overflow**: Tag with `blueznet` and `bluetooth`
-
-### Reporting Bugs
-
-Include:
-- Full error message and stack trace
-- Minimal code to reproduce
-- Debug logs
-- System configuration
-- What you expected vs what happened
-
-Example bug report:
-```markdown
-**Environment:**
-- OS: Raspberry Pi OS 11 (bullseye)
-- .NET: 9.0.100
-- BlueZ: 5.66
-- Device: iPhone 13 (iOS 17.2)
-
-**Code:**
-```csharp
-await controller.PlayAsync("XX:XX:XX:XX:XX:XX");
-```
-
-**Expected:** Music starts playing
-**Actual:** Returns false, no playback
-
-**Logs:**
-[Attach debug logs]
-```
+1. **AVRCP Versions**: Older devices may only support AVRCP 1.3 (no browsing, no position info).
+2. **Media App Support**: Streaming apps may limit AVRCP features (e.g., browsing). DRM content may block metadata.

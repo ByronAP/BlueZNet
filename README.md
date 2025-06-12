@@ -85,7 +85,7 @@ Install-Package BlueZNet
 
 3. Reference in your project:
    ```xml
-   <ProjectReference Include="path/to/BlueZNet/BlueZNet.csproj" />
+   <ProjectReference Include="path/to/BlueZNet/src/BlueZNet.csproj" />
    ```
 
 ## 🚀 Quick Start
@@ -139,7 +139,7 @@ if (phone != null)
     if (caps.Avrcp.SupportsPlayback)
     {
         // Control playback with timeout
-        using var playbackCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var playbackCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         
         await controller.PlayAsync(phone.Address, playbackCts.Token);
         await Task.Delay(5000, playbackCts.Token);
@@ -232,7 +232,7 @@ The library requires BlueZ with experimental features enabled. See our [setup gu
 using var loggerFactory = LoggerFactory.Create(builder => 
     builder
         .AddConsole()
-        .AddFile("bluetooth.log") // If using Serilog
+        .AddFile("bluetooth.log") // If using a file logger like Serilog
         .SetMinimumLevel(LogLevel.Debug));
 
 var controller = new BlueZNetControllerService(loggerFactory.CreateLogger<BlueZNetControllerService>());
@@ -438,12 +438,6 @@ Console.WriteLine($"Supported codecs: {string.Join(", ", caps.A2dp.SupportedCode
 #### **"Device not found" errors**
 ```csharp
 // Always validate MAC address format and check device capabilities first
-if (!BlueZNet.Services.BlueZNetControllerService.IsValidMacAddress(deviceAddress))
-{
-    Console.WriteLine("Invalid MAC address format");
-    return;
-}
-
 var device = (await controller.GetConnectedDevicesAsync()).FirstOrDefault(d => d.Name.Contains("MyPhone"));
 if (device == null)
 {
@@ -504,7 +498,7 @@ catch (OperationCanceledException)
 
 #### **Handle collection modifications safely**
 ```csharp
-// The library handles this internally, but for your code:
+// The library returns IReadOnlyList, which is safe. For your own code:
 var devices = await controller.GetConnectedDevicesAsync();
 foreach (var device in devices.ToList()) // ToList() prevents modification exceptions
 {
@@ -523,7 +517,7 @@ var loggerFactory = LoggerFactory.Create(builder =>
 #### **Monitor D-Bus traffic**
 ```bash
 # Watch BlueZ D-Bus messages
-dbus-monitor --system "interface='org.bluez.*'"
+dbus-monitor --system "interface='org.bluez.MediaPlayer1'"
 ```
 
 #### **Test device capabilities**
@@ -547,14 +541,14 @@ dotnet test
 ### **Integration Tests**
 ```bash
 # Requires actual Bluetooth devices
-dotnet test --category Integration
+dotnet test --filter "TestCategory=Integration"
 ```
 
 ### **Manual Testing**
 The library includes a comprehensive example application for manual testing:
 
 ```bash
-cd BlueZNet.Example
+cd samples/BlueZNet.Example
 dotnet run
 ```
 
@@ -609,7 +603,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **[Complete Setup Guide](docs/setup.md)** - Detailed BlueZ and PulseAudio configuration
 - **[API Documentation](docs/api.md)** - Complete API reference
-- **[Examples](examples/)** - Additional usage examples
+- **[Examples](samples/)** - Additional usage examples
 - **[Troubleshooting Guide](docs/troubleshooting.md)** - Common issues and solutions
 
 ## 🔗 Related Projects

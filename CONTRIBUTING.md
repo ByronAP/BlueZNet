@@ -20,7 +20,7 @@ First off, thank you for considering contributing to BlueZNet! It's people like 
 
 ## Code of Conduct
 
-This project and everyone participating in it is governed by our Code of Conduct. By participating, you are expected to uphold this code. Please report unacceptable behavior to [project maintainers].
+This project and everyone participating in it is governed by our Code of Conduct. By participating, you are expected to uphold this code. Please report unacceptable behavior to project maintainers.
 
 ### Our Standards
 
@@ -32,7 +32,7 @@ This project and everyone participating in it is governed by our Code of Conduct
 ## Getting Started
 
 1. **Fork the repository** on GitHub
-2. **Star the repository** to show your support! ?
+2. **Star the repository** to show your support! ⭐️
 3. **Clone your fork** locally
 4. **Read the documentation** to understand the project
 5. **Run the tests** to ensure everything works
@@ -77,10 +77,10 @@ Minimal code to reproduce the issue
 
 **Environment (please complete the following):**
 - OS: [e.g. Raspberry Pi OS 11]
-- .NET Version: [e.g. 9.0.100]
+- .NET Version: [e.g. 9.0]
 - BlueZ Version: [e.g. 5.66]
 - Device: [e.g. iPhone 13]
-- BlueZNet Version: [e.g. 1.0.0]
+- BlueZNet Version: [e.g. 0.1.0]
 
 **Logs**
 Attach relevant debug logs
@@ -132,7 +132,7 @@ Unsure where to begin contributing? You can start by looking through these issue
 
 - Linux system with Bluetooth hardware (or Raspberry Pi)
 - .NET SDK
-- BlueZ 5.50+ with experimental features
+- BlueZ 5.50+ with experimental features enabled
 - Git
 - Your favorite C# IDE (Visual Studio Code, Rider, Visual Studio)
 
@@ -179,10 +179,11 @@ BlueZNet/
 │   │   └── DBus/            # BlueZ D-Bus protocol interfaces
 │   ├── Services/            # Core service implementations
 │   ├── Models/              # Data models and DTOs
-│   │   ├── Device/          # Bluetooth device representations
-│   │   ├── Media/           # Media player and content models
 │   │   ├── Audio/           # Audio stream and codec models
-│   │   └── Capabilities/    # Device capability information
+│   │   ├── Capabilities/    # Device capability information
+│   │   ├── Config/          # Configuration models
+│   │   ├── Device/          # Bluetooth device representations
+│   │   └── Media/           # Media player and content models
 │   ├── Events/              # Event argument classes for notifications
 │   ├── Enums/               # Enumerations and constants
 │   └── Exceptions/          # Custom exception types
@@ -233,8 +234,8 @@ public interface IBlueZNetController
 // Private fields start with underscore
 private readonly ILogger<BlueZNetControllerService> _logger;
 
-// Constants are UPPER_CASE
-private const string BLUEZ_SERVICE = "org.bluez";
+// Constants are PascalCase
+private const string BluezService = "org.bluez";
 
 // Async methods end with 'Async'
 public async Task<bool> PlayAsync(string deviceAddress)
@@ -247,40 +248,37 @@ public async Task<bool> PlayAsync(string deviceAddress)
 public class ExampleClass
 {
     // 1. Constants
-    private const int DEFAULT_TIMEOUT = 5000;
+    private const int DefaultTimeout = 5000;
     
-    // 2. Static fields
-    private static readonly Regex MacAddressRegex;
-    
-    // 3. Fields
+    // 2. Fields
     private readonly ILogger _logger;
     private bool _isRunning;
     
-    // 4. Constructors
+    // 3. Constructors
     public ExampleClass(ILogger logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     
+    // 4. Events
+    public event EventHandler<EventArgs> StateChanged;
+
     // 5. Properties
     public bool IsRunning => _isRunning;
     
-    // 6. Events
-    public event EventHandler<EventArgs> StateChanged;
-    
-    // 7. Public methods
+    // 6. Public methods
     public async Task StartAsync()
     {
         // Implementation
     }
     
-    // 8. Protected methods
+    // 7. Protected methods
     protected virtual void OnStateChanged()
     {
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
     
-    // 9. Private methods
+    // 8. Private methods
     private void Initialize()
     {
         // Implementation
@@ -558,12 +556,6 @@ Fixes #(issue number)
 
 - Watch the repository for updates
 - Subscribe to releases
-
-### Recognition
-
-Contributors are recognized in:
-- The project README
-- Release notes
 
 ## Questions?
 
