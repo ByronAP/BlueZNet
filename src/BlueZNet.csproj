@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RuntimeIdentifiers>linux-arm64;linux-x64;linux-arm</RuntimeIdentifiers>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\$(AssemblyName).xml</DocumentationFile>
+    <PackageId>BlueZNet</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>ByronAP</Authors>
+    <Description>Advanced Bluetooth device monitoring and control library for Linux using BlueZ and PulseAudio</Description>
+    <PackageTags>bluetooth;bluez;pulseaudio;raspberry-pi;audio;avrcp;a2dp;linux</PackageTags>
+    <RepositoryUrl>https://github.com/ByronAP/BlueZNet</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ByronAP/BlueZNet</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tmds.DBus" Version="0.21.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.6" />
+  </ItemGroup>
+</Project>
